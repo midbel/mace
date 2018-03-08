@@ -61,7 +61,8 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	}
 	other := template
 	if bs, err := ioutil.ReadFile(*parent); err == nil {
-		if c, err := x509.ParseCertificate(bs); err == nil {
+		b, _ := pem.Decode(bs)
+		if c, err := x509.ParseCertificate(b.Bytes); err == nil {
 			other = *c
 		}
 	}
