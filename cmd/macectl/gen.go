@@ -15,14 +15,36 @@ import (
 	"time"
 
 	"github.com/midbel/cli"
+	"github.com/midbel/toml"
 )
+
+type subject struct {
+	Country      string `toml:"country"`
+	State        string `toml:"state"`
+	Locality     string `toml:"locality"`
+	Organization string `toml:"organization"`
+	Unit         string `toml:"unit"`
+	Name         string `toml:"fqdn"`
+	Email        string `toml:"email"`
+}
+
+func (s subject) ToName() pkix.Name {
+	return pkix.Name{
+		Country:            []string{s.Country},
+		Province:           []string{s.State},
+		Locality:           []string{s.Locality},
+		Organization:       []string{s.Organization},
+		OrganizationalUnit: []string{s.Unit},
+		CommonName:         s.Name,
+	}
+}
 
 func runGenerate(cmd *cli.Command, args []string) error {
 	stamp := cmd.Flag.String("t", "", "timestamp")
 	days := cmd.Flag.Duration("d", 0, "days")
 	parent := cmd.Flag.String("p", "", "")
+	setting := cmd.Flag.String("s", "", "subject")
 	bits := cmd.Flag.Int("c", 2048, "")
-	orga := cmd.Flag.String("o", "", "organization")
 	root := cmd.Flag.Bool("r", false, "root ca")
 	name := cmd.Flag.String("n", "mace", "name")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -47,14 +69,18 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		return err
 	}
 
+	sub := readSubject(*setting)
 	template := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{Organization: []string{*orga}},
+		Subject:               sub.ToName(),
 		NotBefore:             now,
 		NotAfter:              now.Add(*days),
 		IsCA:                  *root,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
+		BasicConstraintsValid: *root,
+	}
+	if sub.Email != "" {
+		template.EmailAddresses = []string{sub.Email}
 	}
 	if *root {
 		template.KeyUsage |= x509.KeyUsageCertSign
@@ -64,6 +90,11 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		b, _ := pem.Decode(bs)
 		if c, err := x509.ParseCertificate(b.Bytes); err == nil {
 			other = *c
+			if other.IsCA {
+				template.Issuer = other.Issuer
+			}
+		} else {
+			return err
 		}
 	}
 	bs, err := x509.CreateCertificate(rand.Reader, &template, &other, &priv.PublicKey, priv)
@@ -87,4 +118,35 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("encode key: %s", err)
 	}
 	return ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), *name+".key"), buf.Bytes(), 0600)
+}
+
+func readSubject(f string) subject {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		h = "localhost"
+	}
+	s := subject{
+		Unit: h,
+		Name: h,
+	}
+	if f, err := os.Open(f); err == nil {
+		defer f.Close()
+		if err := toml.NewDecoder(f).Decode(&s); err == nil {
+			return s
+		}
+	}
+	fmt.Print("Country Name (2 letter code) []: ")
+	fmt.Scanln(&s.Country)
+	fmt.Print("State Name (full name) []: ")
+	fmt.Scanln(&s.State)
+	fmt.Print("Locality (eg, city) []: ")
+	fmt.Scanln(&s.Locality)
+	fmt.Print("Organization (eg, company) []: ")
+	fmt.Scanln(&s.Organization)
+	fmt.Printf("Department (eg, IT) [%s]: ", s.Unit)
+	fmt.Scanln(&s.Unit)
+	fmt.Printf("Name (eg, server FQDN) [%s]: ", s.Name)
+	fmt.Scanln(&s.Name)
+
+	return s
 }

@@ -25,10 +25,21 @@ Use {{.Name}} [command] -h for more information about its usage.
 
 var commands = []*cli.Command{
 	{
-		Usage: "generate",
+		Usage: "generate [-t] [-d] [-p] [-s] [-c] [-r] [-n] <path>",
 		Alias: []string{"gen"},
 		Short: "generate certificates",
 		Run:   runGenerate,
+		Desc: `
+
+options:
+  -t date
+  -d period
+  -p parent
+  -s subject
+  -c bits
+  -r root
+  -n name
+`,
 	},
 	{
 		Usage: "verify",
