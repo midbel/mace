@@ -47,6 +47,7 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	bits := cmd.Flag.Int("c", 2048, "")
 	root := cmd.Flag.Bool("r", false, "root ca")
 	name := cmd.Flag.String("n", "mace", "name")
+	host := cmd.Flag.String("x", "", "hostname")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -82,7 +83,11 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		NotAfter:              now.Add(*days),
 		IsCA:                  *root,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
+	}
+	if *host != "" {
+		template.DNSNames = append(template.DNSNames, *host)
 	}
 	if sub.Email != "" {
 		template.EmailAddresses = []string{sub.Email}
