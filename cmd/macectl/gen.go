@@ -50,7 +50,12 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	now := time.Now()
+
+	if err := os.MkdirAll(cmd.Flag.Arg(0), 0700); err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	now := time.Now().Truncate(time.Minute * 5)
 	if n, err := time.Parse(time.RFC3339, *stamp); err == nil {
 		now = n
 	}
@@ -66,7 +71,7 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	limit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, limit)
 	if err != nil {
-		return err
+		return fmt.Errorf("fail to generate serial number: %s", err)
 	}
 
 	sub := readSubject(*setting)
@@ -77,7 +82,7 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		NotAfter:              now.Add(*days),
 		IsCA:                  *root,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: *root,
+		BasicConstraintsValid: true,
 	}
 	if sub.Email != "" {
 		template.EmailAddresses = []string{sub.Email}
@@ -105,10 +110,7 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	if err := pem.Encode(buf, &pem.Block{Type: "CERTIFICATE", Bytes: bs}); err != nil {
 		return fmt.Errorf("encode cert: %s", err)
 	}
-	if err := os.MkdirAll(cmd.Flag.Arg(0), 0700); err != nil && !os.IsExist(err) {
-		return err
-	}
-	if err := ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), *name+".cert"), buf.Bytes(), 0600); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), *name+".pem"), buf.Bytes(), 0600); err != nil {
 		return err
 	}
 	buf.Reset()
@@ -147,6 +149,8 @@ func readSubject(f string) subject {
 	fmt.Scanln(&s.Unit)
 	fmt.Printf("Name (eg, server FQDN) [%s]: ", s.Name)
 	fmt.Scanln(&s.Name)
+	fmt.Printf("Email (eg, no-reply@foobar.com) []: ")
+	fmt.Scanln(&s.Email)
 
 	return s
 }
