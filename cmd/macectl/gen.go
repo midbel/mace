@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -46,6 +49,7 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	setting := cmd.Flag.String("s", "", "subject")
 	bits := cmd.Flag.Int("c", 2048, "")
 	root := cmd.Flag.Bool("r", false, "root ca")
+	esd := cmd.Flag.Bool("e", false, "esdca")
 	name := cmd.Flag.String("n", "mace", "name")
 	host := cmd.Flag.String("x", "", "hostname")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -63,8 +67,15 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	if *days <= 0 {
 		*days = time.Hour * 24 * 365
 	}
-
-	priv, err := rsa.GenerateKey(rand.Reader, *bits)
+	var (
+		priv interface{}
+		err  error
+	)
+	if *esd {
+		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	} else {
+		priv, err = rsa.GenerateKey(rand.Reader, *bits)
+	}
 	if err != nil {
 		return err
 	}
@@ -107,7 +118,8 @@ func runGenerate(cmd *cli.Command, args []string) error {
 			return err
 		}
 	}
-	bs, err := x509.CreateCertificate(rand.Reader, &template, &other, &priv.PublicKey, priv)
+
+	bs, err := x509.CreateCertificate(rand.Reader, &template, &other, publicKey(priv), priv)
 	if err != nil {
 		return fmt.Errorf("create cert: %s", err)
 	}
@@ -120,11 +132,32 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	}
 	buf.Reset()
 
-	bs = x509.MarshalPKCS1PrivateKey(priv)
-	if err := pem.Encode(buf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: bs}); err != nil {
-		return fmt.Errorf("encode key: %s", err)
+	switch k := priv.(type) {
+	case *rsa.PrivateKey:
+		bs := x509.MarshalPKCS1PrivateKey(k)
+		if err := pem.Encode(buf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: bs}); err != nil {
+			return fmt.Errorf("encode rsa key: %s", err)
+		}
+	case *ecdsa.PrivateKey:
+		bs, err := x509.MarshalECPrivateKey(k)
+		if err != nil {
+			return fmt.Errorf("encode ecdsa key: %s", err)
+		}
+		if err := pem.Encode(buf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: bs}); err != nil {
+			return fmt.Errorf("encode ecdsa key: %s", err)
+		}
 	}
 	return ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), *name+".key"), buf.Bytes(), 0600)
+}
+
+func publicKey(p interface{}) crypto.PublicKey {
+	switch k := p.(type) {
+	case *rsa.PrivateKey:
+		return k.Public()
+	case *ecdsa.PrivateKey:
+		return k.Public()
+	}
+	return nil
 }
 
 func readSubject(f string) subject {
