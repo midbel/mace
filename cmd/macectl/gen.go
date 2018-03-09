@@ -14,12 +14,34 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"net"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
 )
+
+type hosts []string
+
+func (h *hosts) String() string {
+	return fmt.Sprint(*h)
+}
+
+func (h *hosts) Set(vs string) error {
+	for _, v := range strings.Split(vs, ",") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		*h = append(*h, v)
+	}
+	if len(*h) == 0 {
+		return fmt.Errorf("no hosts provided")
+	}
+	return nil
+}
 
 type subject struct {
 	Country      string `toml:"country"`
@@ -43,15 +65,16 @@ func (s subject) ToName() pkix.Name {
 }
 
 func runGenerate(cmd *cli.Command, args []string) error {
+	var hs hosts
+	cmd.Flag.Var(&hs, "x", "hosts")
 	stamp := cmd.Flag.String("t", "", "timestamp")
 	days := cmd.Flag.Duration("d", 0, "days")
 	parent := cmd.Flag.String("p", "", "")
 	setting := cmd.Flag.String("s", "", "subject")
 	bits := cmd.Flag.Int("c", 2048, "")
 	root := cmd.Flag.Bool("r", false, "root ca")
-	esd := cmd.Flag.Bool("e", false, "esdca")
+	curve := cmd.Flag.String("e", "", "ecdsa")
 	name := cmd.Flag.String("n", "mace", "name")
-	host := cmd.Flag.String("x", "", "hostname")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -71,10 +94,13 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		priv interface{}
 		err  error
 	)
-	if *esd {
-		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	} else {
+	switch strings.ToLower(*curve) {
+	case "":
 		priv, err = rsa.GenerateKey(rand.Reader, *bits)
+	case "p256":
+		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	default:
+		return fmt.Errorf("unrecognized curve %s", *curve)
 	}
 	if err != nil {
 		return err
@@ -97,9 +123,6 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
-	if *host != "" {
-		template.DNSNames = append(template.DNSNames, *host)
-	}
 	if sub.Email != "" {
 		template.EmailAddresses = []string{sub.Email}
 	}
@@ -116,6 +139,13 @@ func runGenerate(cmd *cli.Command, args []string) error {
 			}
 		} else {
 			return err
+		}
+	}
+	for _, h := range hs {
+		if ip := net.ParseIP(h); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, h)
 		}
 	}
 
