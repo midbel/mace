@@ -42,6 +42,11 @@ options:
 `,
 	},
 	{
+		Usage: "genrsa [-n] <file>",
+		Short: "generate a rsa key",
+		Run:   runGenRSA,
+	},
+	{
 		Usage: "verify",
 		Alias: []string{"check"},
 		Short: "verify certificates",
