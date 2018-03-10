@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -17,6 +20,12 @@ import (
 	"time"
 
 	"github.com/midbel/cli"
+)
+
+const (
+	BlockTypeRSA   = "RSA PRIVATE KEY"
+	BlockTypeECDSA = "EC PRIVATE KEY"
+	BlockTypeCert  = "CERTIFICATE"
 )
 
 type Time struct {
@@ -81,8 +90,6 @@ func (s Subject) ToName() pkix.Name {
 }
 
 type Certificate struct {
-	Name string
-
 	Root   bool
 	CACert string
 	CAKey  string
@@ -95,7 +102,7 @@ type Certificate struct {
 	Bits  int
 }
 
-func (c Certificate) LoadCA() (*x509.Certificate, *rsa.PrivateKey, error) {
+func (c Certificate) LoadCA() (*x509.Certificate, crypto.Signer, error) {
 	var (
 		b   *pem.Block
 		bs  []byte
@@ -113,19 +120,48 @@ func (c Certificate) LoadCA() (*x509.Certificate, *rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if !cert.IsCA {
+		return nil, nil, fmt.Errorf("not a ca certificate")
+	}
 	if bs, err = ioutil.ReadFile(c.CAKey); err != nil {
 		return nil, nil, err
 	}
 	b, _ = pem.Decode(bs)
-	key, err := x509.ParsePKCS1PrivateKey(b.Bytes)
+
+	var key crypto.Signer
+	switch b.Type {
+	case BlockTypeRSA:
+		key, err = x509.ParsePKCS1PrivateKey(b.Bytes)
+	case BlockTypeECDSA:
+		key, err = x509.ParseECPrivateKey(b.Bytes)
+	default:
+		return nil, nil, fmt.Errorf("unrecognized block type for CA key %s", b.Type)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
 	return cert, key, nil
 }
 
-func (c Certificate) Create(s Subject) (*x509.Certificate, *rsa.PrivateKey, error) {
-	key, err := rsa.GenerateKey(rand.Reader, c.Bits)
+func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error) {
+	var (
+		key crypto.Signer
+		err error
+	)
+	switch c.Curve {
+	case "":
+		key, err = rsa.GenerateKey(rand.Reader, c.Bits)
+	case "P224":
+		key, err = ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	case "P256":
+		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	case "P384":
+		key, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	case "P521":
+		key, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	default:
+		return nil, nil, fmt.Errorf("unrecognized curve %s", c.Curve)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -147,7 +183,7 @@ func (c Certificate) Create(s Subject) (*x509.Certificate, *rsa.PrivateKey, erro
 		BasicConstraintsValid: true,
 	}
 	if c.Root {
-		cert.KeyUsage |= x509.KeyUsageCertSign
+		cert.KeyUsage |= x509.KeyUsageCertSign | x509.KeyUsageCRLSign
 	}
 	if s.Email != "" {
 		cert.EmailAddresses = []string{s.Email}
@@ -175,14 +211,29 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	cmd.Flag.DurationVar(&c.Period, "d", 0, "days")
 	cmd.Flag.StringVar(&c.CACert, "p", "", "ca certificate")
 	cmd.Flag.StringVar(&c.CAKey, "k", "", "ca private key")
+	cmd.Flag.StringVar(&c.Curve, "e", "", "elliptic curve")
 	cmd.Flag.IntVar(&c.Bits, "c", 2048, "")
 	cmd.Flag.BoolVar(&c.Root, "r", false, "root ca")
-	cmd.Flag.StringVar(&c.Name, "n", name, "name")
+	cmd.Flag.StringVar(&name, "n", name, "name")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	sub := readSubject()
-	cert, key, err := c.Create(sub)
+
+	prompt := func(label string, v interface{}) {
+		fmt.Print(label)
+		fmt.Scanln(v)
+	}
+
+	var s Subject
+	prompt("Country Name (2 letter code): ", &s.Country)
+	prompt("State Name (full name): ", &s.State)
+	prompt("Locality (eg, city): ", &s.Locality)
+	prompt("Organization (eg, company): ", &s.Organization)
+	prompt("Department (eg, IT): ", &s.Unit)
+	prompt("Name (eg, server FQDN): ", &s.Name)
+	prompt("Email (eg, no-reply@foobar.com): ", &s.Email)
+
+	cert, key, err := c.Create(s)
 	if err != nil {
 		return err
 	}
@@ -201,38 +252,37 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("create cert: %s", err)
 	}
 	buf := new(bytes.Buffer)
-	if err := pem.Encode(buf, &pem.Block{Type: "CERTIFICATE", Bytes: bs}); err != nil {
+	if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCert, Bytes: bs}); err != nil {
 		return fmt.Errorf("encode cert: %s", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), c.Name+".pem"), buf.Bytes(), 0600); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), name+".pem"), buf.Bytes(), 0400); err != nil {
 		return err
 	}
-	buf.Reset()
+	return writePrivateKey(filepath.Join(cmd.Flag.Arg(0), name+".key"), key)
 
-	bs = x509.MarshalPKCS1PrivateKey(key)
-	if err := pem.Encode(buf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: bs}); err != nil {
-		return fmt.Errorf("encode rsa key: %s", err)
-	}
-	return ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), c.Name+".key"), buf.Bytes(), 0600)
 }
 
-func readSubject() Subject {
-	var s Subject
-
-	fmt.Print("Country Name (2 letter code) []: ")
-	fmt.Scanln(&s.Country)
-	fmt.Print("State Name (full name) []: ")
-	fmt.Scanln(&s.State)
-	fmt.Print("Locality (eg, city) []: ")
-	fmt.Scanln(&s.Locality)
-	fmt.Print("Organization (eg, company) []: ")
-	fmt.Scanln(&s.Organization)
-	fmt.Printf("Department (eg, IT) [%s]: ", s.Unit)
-	fmt.Scanln(&s.Unit)
-	fmt.Printf("Name (eg, server FQDN) [%s]: ", s.Name)
-	fmt.Scanln(&s.Name)
-	fmt.Printf("Email (eg, no-reply@foobar.com) []: ")
-	fmt.Scanln(&s.Email)
-
-	return s
+func writePrivateKey(p string, s crypto.Signer) error {
+	var (
+		bs []byte
+		t  string
+	)
+	switch k := s.(type) {
+	case *rsa.PrivateKey:
+		bs = x509.MarshalPKCS1PrivateKey(k)
+		t = BlockTypeRSA
+	case *ecdsa.PrivateKey:
+		vs, err := x509.MarshalECPrivateKey(k)
+		if err != nil {
+			return err
+		}
+		bs, t = vs, BlockTypeECDSA
+	default:
+		return fmt.Errorf("unrecognized private key type  (%T)", s)
+	}
+	buf := new(bytes.Buffer)
+	if err := pem.Encode(buf, &pem.Block{Type: t, Bytes: bs}); err != nil {
+		return fmt.Errorf("encode key: %s", err)
+	}
+	return ioutil.WriteFile(p, buf.Bytes(), 0400)
 }
