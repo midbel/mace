@@ -22,6 +22,8 @@ import (
 	"github.com/midbel/cli"
 )
 
+const DefaultRSAKeyLength = 2048
+
 const (
 	BlockTypeRSA   = "RSA PRIVATE KEY"
 	BlockTypeECDSA = "EC PRIVATE KEY"
@@ -37,6 +39,10 @@ func (t *Time) String() string {
 }
 
 func (t *Time) Set(v string) error {
+	if v == "" {
+		t.Time = time.Now()
+		return nil
+	}
 	i, err := time.Parse(time.RFC3339, v)
 	if err != nil {
 		return err
@@ -97,6 +103,7 @@ type Certificate struct {
 	Period time.Duration
 	Date   Time
 	Hosts  StringArray
+	Usages StringArray
 
 	Curve string
 	Bits  int
@@ -144,24 +151,7 @@ func (c Certificate) LoadCA() (*x509.Certificate, crypto.Signer, error) {
 }
 
 func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error) {
-	var (
-		key crypto.Signer
-		err error
-	)
-	switch c.Curve {
-	case "":
-		key, err = rsa.GenerateKey(rand.Reader, c.Bits)
-	case "P224":
-		key, err = ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
-	case "P256":
-		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	case "P384":
-		key, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	case "P521":
-		key, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	default:
-		return nil, nil, fmt.Errorf("unrecognized curve %s", c.Curve)
-	}
+	key, err := createPrivateKey(c.Curve, c.Bits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -169,6 +159,9 @@ func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error)
 	serial, err := rand.Int(rand.Reader, limit)
 	if err != nil {
 		return nil, nil, err
+	}
+	if c.Date.IsZero() {
+		c.Date.Time = time.Now()
 	}
 	if c.Period == 0 {
 		c.Period = time.Hour * 365 * 24
@@ -195,6 +188,18 @@ func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error)
 			cert.DNSNames = append(cert.DNSNames, h)
 		}
 	}
+	for _, u := range c.Usages {
+		switch u {
+		case "auth":
+			cert.ExtKeyUsage = append(cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
+		case "server":
+			cert.ExtKeyUsage = append(cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth)
+		case "client":
+			cert.ExtKeyUsage = append(cert.ExtKeyUsage, x509.ExtKeyUsageClientAuth)
+		case "any":
+			cert.ExtKeyUsage = append(cert.ExtKeyUsage, x509.ExtKeyUsageAny)
+		}
+	}
 	return &cert, key, nil
 }
 
@@ -208,11 +213,12 @@ func runGenerate(cmd *cli.Command, args []string) error {
 
 	cmd.Flag.Var(&c.Hosts, "x", "hosts")
 	cmd.Flag.Var(&c.Date, "t", "timestamp")
+	cmd.Flag.Var(&c.Usages, "u", "usage")
 	cmd.Flag.DurationVar(&c.Period, "d", 0, "days")
 	cmd.Flag.StringVar(&c.CACert, "p", "", "ca certificate")
 	cmd.Flag.StringVar(&c.CAKey, "k", "", "ca private key")
 	cmd.Flag.StringVar(&c.Curve, "e", "", "elliptic curve")
-	cmd.Flag.IntVar(&c.Bits, "c", 2048, "")
+	cmd.Flag.IntVar(&c.Bits, "c", DefaultRSAKeyLength, "")
 	cmd.Flag.BoolVar(&c.Root, "r", false, "root ca")
 	cmd.Flag.StringVar(&name, "n", name, "name")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -285,4 +291,26 @@ func writePrivateKey(p string, s crypto.Signer) error {
 		return fmt.Errorf("encode key: %s", err)
 	}
 	return ioutil.WriteFile(p, buf.Bytes(), 0400)
+}
+
+func createPrivateKey(c string, n int) (crypto.Signer, error) {
+	var (
+		key crypto.Signer
+		err error
+	)
+	switch c {
+	case "":
+		key, err = rsa.GenerateKey(rand.Reader, n)
+	case "P224":
+		key, err = ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	case "P256":
+		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	case "P384":
+		key, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	case "P521":
+		key, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	default:
+		err = fmt.Errorf("unrecognized curve %s", c)
+	}
+	return key, err
 }
