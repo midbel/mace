@@ -2,9 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -13,14 +10,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
-	"os"
 	"net"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/midbel/cli"
-	"github.com/midbel/toml"
 )
 
 type hosts []string
@@ -54,12 +49,18 @@ type subject struct {
 }
 
 func (s subject) ToName() pkix.Name {
+	value := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	}
 	return pkix.Name{
-		Country:            []string{s.Country},
-		Province:           []string{s.State},
-		Locality:           []string{s.Locality},
-		Organization:       []string{s.Organization},
-		OrganizationalUnit: []string{s.Unit},
+		Country:            value(s.Country),
+		Province:           value(s.State),
+		Locality:           value(s.Locality),
+		Organization:       value(s.Organization),
+		OrganizationalUnit: value(s.Unit),
 		CommonName:         s.Name,
 	}
 }
@@ -70,86 +71,61 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	stamp := cmd.Flag.String("t", "", "timestamp")
 	days := cmd.Flag.Duration("d", 0, "days")
 	parent := cmd.Flag.String("p", "", "")
-	setting := cmd.Flag.String("s", "", "subject")
+	sign := cmd.Flag.String("k", "", "")
 	bits := cmd.Flag.Int("c", 2048, "")
 	root := cmd.Flag.Bool("r", false, "root ca")
-	curve := cmd.Flag.String("e", "", "ecdsa")
 	name := cmd.Flag.String("n", "mace", "name")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
+	sub := readSubject()
 
-	if err := os.MkdirAll(cmd.Flag.Arg(0), 0700); err != nil && !os.IsExist(err) {
-		return err
-	}
-
-	now := time.Now().Truncate(time.Minute * 5)
-	if n, err := time.Parse(time.RFC3339, *stamp); err == nil {
-		now = n
-	}
-	if *days <= 0 {
-		*days = time.Hour * 24 * 365
-	}
-	var (
-		priv interface{}
-		err  error
-	)
-	switch strings.ToLower(*curve) {
-	case "":
-		priv, err = rsa.GenerateKey(rand.Reader, *bits)
-	case "p256":
-		priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	default:
-		return fmt.Errorf("unrecognized curve %s", *curve)
-	}
+	t, err := createCertificate(*stamp, *days, *root)
 	if err != nil {
 		return err
 	}
-
-	limit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serial, err := rand.Int(rand.Reader, limit)
-	if err != nil {
-		return fmt.Errorf("fail to generate serial number: %s", err)
-	}
-
-	sub := readSubject(*setting)
-	template := x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               sub.ToName(),
-		NotBefore:             now,
-		NotAfter:              now.Add(*days),
-		IsCA:                  *root,
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		BasicConstraintsValid: true,
-	}
+	t.Subject = sub.ToName()
 	if sub.Email != "" {
-		template.EmailAddresses = []string{sub.Email}
+		t.EmailAddresses = []string{sub.Email}
 	}
-	if *root {
-		template.KeyUsage |= x509.KeyUsageCertSign
+	for _, h := range hs {
+		if ip := net.ParseIP(h); ip != nil {
+			t.IPAddresses = append(t.IPAddresses, ip)
+		} else {
+			t.DNSNames = append(t.DNSNames, h)
+		}
 	}
-	other := template
+
+	priv, err := rsa.GenerateKey(rand.Reader, *bits)
+	if err != nil {
+		return err
+	}
+
+	other := t
+
+	pkey := priv
 	if bs, err := ioutil.ReadFile(*parent); err == nil {
 		b, _ := pem.Decode(bs)
 		if c, err := x509.ParseCertificate(b.Bytes); err == nil {
-			other = *c
+			other = c
 			if other.IsCA {
-				template.Issuer = other.Issuer
+				t.Issuer = other.Issuer
+			}
+		} else {
+			return err
+		}
+		if bs, err := ioutil.ReadFile(*sign); err == nil {
+			b, _ := pem.Decode(bs)
+			pkey, err = x509.ParsePKCS1PrivateKey(b.Bytes)
+			if err != nil {
+				return fmt.Errorf("parse signer key: %s", err)
 			}
 		} else {
 			return err
 		}
 	}
-	for _, h := range hs {
-		if ip := net.ParseIP(h); ip != nil {
-			template.IPAddresses = append(template.IPAddresses, ip)
-		} else {
-			template.DNSNames = append(template.DNSNames, h)
-		}
-	}
 
-	bs, err := x509.CreateCertificate(rand.Reader, &template, &other, publicKey(priv), priv)
+	bs, err := x509.CreateCertificate(rand.Reader, t, other, priv.Public(), pkey)
 	if err != nil {
 		return fmt.Errorf("create cert: %s", err)
 	}
@@ -162,49 +138,48 @@ func runGenerate(cmd *cli.Command, args []string) error {
 	}
 	buf.Reset()
 
-	switch k := priv.(type) {
-	case *rsa.PrivateKey:
-		bs := x509.MarshalPKCS1PrivateKey(k)
-		if err := pem.Encode(buf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: bs}); err != nil {
-			return fmt.Errorf("encode rsa key: %s", err)
-		}
-	case *ecdsa.PrivateKey:
-		bs, err := x509.MarshalECPrivateKey(k)
-		if err != nil {
-			return fmt.Errorf("encode ecdsa key: %s", err)
-		}
-		if err := pem.Encode(buf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: bs}); err != nil {
-			return fmt.Errorf("encode ecdsa key: %s", err)
-		}
+	bs = x509.MarshalPKCS1PrivateKey(priv)
+	if err := pem.Encode(buf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: bs}); err != nil {
+		return fmt.Errorf("encode rsa key: %s", err)
 	}
 	return ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), *name+".key"), buf.Bytes(), 0600)
 }
 
-func publicKey(p interface{}) crypto.PublicKey {
-	switch k := p.(type) {
-	case *rsa.PrivateKey:
-		return k.Public()
-	case *ecdsa.PrivateKey:
-		return k.Public()
+func createCertificate(s string, d time.Duration, ca bool) (*x509.Certificate, error) {
+	now := time.Now().Truncate(time.Minute * 5)
+	if n, err := time.Parse(time.RFC3339, s); err == nil {
+		now = n
+	} else {
+		return nil, err
 	}
-	return nil
+	if d <= 0 {
+		d = time.Hour * 24 * 365
+	}
+
+	limit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, limit)
+	if err != nil {
+		return nil, fmt.Errorf("fail to generate serial number: %s", err)
+	}
+
+	t := x509.Certificate{
+		SerialNumber:          serial,
+		NotBefore:             now,
+		NotAfter:              now.Add(d),
+		IsCA:                  ca,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+
+	if ca {
+		t.KeyUsage |= x509.KeyUsageCertSign
+	}
+	return &t, nil
 }
 
-func readSubject(f string) subject {
-	h, err := os.Hostname()
-	if err != nil || h == "" {
-		h = "localhost"
-	}
-	s := subject{
-		Unit: h,
-		Name: h,
-	}
-	if f, err := os.Open(f); err == nil {
-		defer f.Close()
-		if err := toml.NewDecoder(f).Decode(&s); err == nil {
-			return s
-		}
-	}
+func readSubject() subject {
+	var s subject
+
 	fmt.Print("Country Name (2 letter code) []: ")
 	fmt.Scanln(&s.Country)
 	fmt.Print("State Name (full name) []: ")
