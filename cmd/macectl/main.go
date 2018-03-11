@@ -116,7 +116,7 @@ options:
 		Run:   runEmitCSR,
 	},
 	{
-		Usage: "convert [-d] [-k] <certificate>",
+		Usage: "convert [-d] [-k] <certificate,...>",
 		Short: "transform a certificate to its corresponding csr",
 		Run:   runConvertToCSR,
 	},

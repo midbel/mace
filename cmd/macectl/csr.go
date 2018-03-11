@@ -179,8 +179,19 @@ func runConvertToCSR(cmd *cli.Command, args []string) error {
 	default:
 		return err
 	}
+	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
+		return err
+	}
+  for _, a := range cmd.Flag.Args() {
+    if err := convertCertToCSR(a, *certdir, certkey); err != nil {
+      log.Printf("fail to create CSR from %s: %s", a, err)
+    }
+  }
+  return nil
+}
 
-	cert, err := readCertificate(cmd.Flag.Arg(0))
+func convertCertToCSR(file, dir string, key crypto.Signer) error {
+	cert, err := readCertificate(file)
 	if err != nil {
 		return err
 	}
@@ -190,16 +201,12 @@ func runConvertToCSR(cmd *cli.Command, args []string) error {
 		DNSNames:       cert.DNSNames,
 		EmailAddresses: cert.EmailAddresses,
 	}
-	bs, err := x509.CreateCertificateRequest(rand.Reader, &csr, certkey)
+	bs, err := x509.CreateCertificateRequest(rand.Reader, &csr, key)
 	if err != nil {
 		return err
 	}
-
-	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
-		return err
-	}
-	n := filepath.Base(cmd.Flag.Arg(0))
-	w, err := os.OpenFile(filepath.Join(*certdir, n+".csr"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0400)
+	n := filepath.Base(file)
+	w, err := os.OpenFile(filepath.Join(dir, n+".csr"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0400)
 	if err != nil {
 		return err
 	}
