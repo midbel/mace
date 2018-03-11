@@ -116,7 +116,7 @@ options:
 		Run:   runEmitCSR,
 	},
 	{
-		Usage: "convert [-d] <certificate,...>",
+		Usage: "convert [-d] [-k] <certificate>",
 		Short: "transform a certificate to its corresponding csr",
 		Run:   runConvertToCSR,
 	},
@@ -153,30 +153,42 @@ func main() {
 }
 
 func loadCA(cacert, cakey string) (*x509.Certificate, crypto.Signer, error) {
-	var (
-		b   *pem.Block
-		bs  []byte
-		err error
-	)
-	switch bs, err = ioutil.ReadFile(cacert); {
+	cert, err := readCertificate(cacert)
+	switch {
 	case err == nil:
 	case os.IsNotExist(err):
 		return nil, nil, nil
 	default:
 		return nil, nil, err
 	}
-	b, _ = pem.Decode(bs)
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		return nil, nil, err
-	}
 	if !cert.IsCA {
 		return nil, nil, fmt.Errorf("not a ca certificate")
 	}
-	if bs, err = ioutil.ReadFile(cakey); err != nil {
+	key, err := readPrivateKey(cakey)
+	if err != nil {
 		return nil, nil, err
 	}
-	b, _ = pem.Decode(bs)
+	return cert, key, nil
+}
+
+func readCertificate(file string) (*x509.Certificate, error) {
+	bs, err := ioutil.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	b, _ := pem.Decode(bs)
+	if b.Type != BlockTypeCert {
+		return nil, fmt.Errorf("unexpected block type %s", b.Type)
+	}
+	return x509.ParseCertificate(b.Bytes)
+}
+
+func readPrivateKey(file string) (crypto.Signer, error) {
+	bs, err := ioutil.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	b, _ := pem.Decode(bs)
 
 	var key crypto.Signer
 	switch b.Type {
@@ -185,10 +197,7 @@ func loadCA(cacert, cakey string) (*x509.Certificate, crypto.Signer, error) {
 	case BlockTypeECDSA:
 		key, err = x509.ParseECPrivateKey(b.Bytes)
 	default:
-		return nil, nil, fmt.Errorf("unrecognized block type for CA key %s", b.Type)
+		return nil, fmt.Errorf("unexpected key type %s", b.Type)
 	}
-	if err != nil {
-		return nil, nil, err
-	}
-	return cert, key, nil
+	return key, err
 }

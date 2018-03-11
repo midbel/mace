@@ -159,41 +159,48 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 }
 
 func runConvertToCSR(cmd *cli.Command, args []string) error {
+	key := cmd.Flag.String("k", "", "key file")
 	certdir := cmd.Flag.String("d", "", "certificates directory")
 	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	certkey, err := readPrivateKey(*key)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
+		certkey, err = createPrivateKey("", DefaultRSAKeyLength)
+		if err != nil {
+			return err
+		}
+		dir, name := filepath.Split(cmd.Flag.Arg(0))
+		if err := writePrivateKey(filepath.Join(dir, name+".key"), certkey); err != nil {
+			return err
+		}
+	default:
+		return err
+	}
+
+	cert, err := readCertificate(cmd.Flag.Arg(0))
+	if err != nil {
+		return err
+	}
+	csr := x509.CertificateRequest{
+		Subject:        cert.Subject,
+		IPAddresses:    cert.IPAddresses,
+		DNSNames:       cert.DNSNames,
+		EmailAddresses: cert.EmailAddresses,
+	}
+	bs, err := x509.CreateCertificateRequest(rand.Reader, &csr, certkey)
+	if err != nil {
+		return err
+	}
+	buf := new(bytes.Buffer)
+	if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
-	for _, a := range cmd.Flag.Args() {
-		bs, err := ioutil.ReadFile(a)
-		if err != nil {
-			continue
-		}
-		b, _ := pem.Decode(bs)
-		cert, err := x509.ParseCertificate(b.Bytes)
-		if err != nil {
-			continue
-		}
-		csr := x509.CertificateRequest{
-			Subject:        cert.Subject,
-			IPAddresses:    cert.IPAddresses,
-			DNSNames:       cert.DNSNames,
-			EmailAddresses: cert.EmailAddresses,
-		}
-		bs, err = x509.CreateCertificateRequest(rand.Reader, &csr, nil)
-		if err != nil {
-			continue
-		}
-		buf := new(bytes.Buffer)
-		if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
-			continue
-		}
-		name := filepath.Base(a)
-		if err := ioutil.WriteFile(filepath.Join(*certdir, name+".csr"), buf.Bytes(), 0400); err != nil {
-			continue
-		}
-	}
-	return nil
+	name := filepath.Base(cmd.Flag.Arg(0))
+	return ioutil.WriteFile(filepath.Join(*certdir, name+".csr"), buf.Bytes(), 0400)
 }
