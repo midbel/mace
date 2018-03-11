@@ -159,5 +159,41 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 }
 
 func runConvertToCSR(cmd *cli.Command, args []string) error {
-	return cmd.Flag.Parse(args)
+	certdir := cmd.Flag.String("d", "", "certificates directory")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
+		return err
+	}
+	for _, a := range cmd.Flag.Args() {
+		bs, err := ioutil.ReadFile(a)
+		if err != nil {
+			continue
+		}
+		b, _ := pem.Decode(bs)
+		cert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			continue
+		}
+		csr := x509.CertificateRequest{
+			Subject:        cert.Subject,
+			IPAddresses:    cert.IPAddresses,
+			DNSNames:       cert.DNSNames,
+			EmailAddresses: cert.EmailAddresses,
+		}
+		bs, err = x509.CreateCertificateRequest(rand.Reader, &csr, nil)
+		if err != nil {
+			continue
+		}
+		buf := new(bytes.Buffer)
+		if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
+			continue
+		}
+		name := filepath.Base(a)
+		if err := ioutil.WriteFile(filepath.Join(*certdir, name+".csr"), buf.Bytes(), 0400); err != nil {
+			continue
+		}
+	}
+	return nil
 }

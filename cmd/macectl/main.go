@@ -106,7 +106,7 @@ options:
 		Run:   runGenRSA,
 	},
 	{
-		Usage: "sign",
+		Usage: "sign [-d] [-p] [-k] <certificate,...>",
 		Short: "sign a CSR from a ca certificate",
 		Run:   runSignCSR,
 	},
@@ -116,11 +116,16 @@ options:
 		Run:   runEmitCSR,
 	},
 	{
+		Usage: "convert [-d] <certificate,...>",
+		Short: "transform a certificate to its corresponding csr",
+		Run:   runConvertToCSR,
+	},
+	{
 		Usage: "revoke <cert>",
 		Short: "revoke a certificate",
 	},
 	{
-		Usage: "verify [-r] [-i] <cert...>",
+		Usage: "verify [-r] [-i] <certificate,...>",
 		Alias: []string{"check"},
 		Short: "verify certificates",
 		Run:   runVerify,
