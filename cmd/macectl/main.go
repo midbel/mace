@@ -49,7 +49,15 @@ options:
 		Run:   runGenRSA,
 	},
 	{
-		Usage: "verify",
+		Usage: "sign",
+		Short: "sign a CSR from a ca certificate",
+	},
+	{
+		Usage: "revoke <cert>",
+		Short: "revoke a certificate",
+	},
+	{
+		Usage: "verify [-r] [-i] <cert...>",
 		Alias: []string{"check"},
 		Short: "verify certificates",
 		Run:   runVerify,

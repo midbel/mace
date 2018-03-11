@@ -12,35 +12,23 @@ import (
 )
 
 func runVerify(cmd *cli.Command, args []string) error {
-	root := cmd.Flag.String("r", "", "cert pool")
+	rootdir := cmd.Flag.String("r", "", "root ca certificates")
+	intdir := cmd.Flag.String("i", "", "intermediate ca certificates")
+	host := cmd.Flag.String("x", "", "host")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	var (
-		pool *x509.CertPool
-		err  error
-	)
-	if is, err := ioutil.ReadDir(*root); err == nil {
-		pool = x509.NewCertPool()
-		for _, i := range is {
-			if i.IsDir() || filepath.Ext(i.Name()) == ".key" {
-				continue
-			}
-			bs, err := ioutil.ReadFile(filepath.Join(*root, i.Name()))
-			if err != nil {
-				return fmt.Errorf("can not read %s: %s", i.Name(), err)
-			}
-			if ok := pool.AppendCertsFromPEM(bs); !ok {
-				return fmt.Errorf("can not read certificate from %s: %s", i.Name(), err)
-			}
-		}
-	} else {
-		pool, err = x509.SystemCertPool()
-	}
+	base, err := Pool(*rootdir, true)
 	if err != nil {
 		return err
 	}
-	opts := x509.VerifyOptions{Roots: pool}
+	other, _ := Pool(*intdir, false)
+
+	opts := x509.VerifyOptions{
+		Roots:         base,
+		Intermediates: other,
+		Host:          *host,
+	}
 	for _, f := range cmd.Flag.Args() {
 		bs, err := ioutil.ReadFile(f)
 		if err != nil {
@@ -53,7 +41,30 @@ func runVerify(cmd *cli.Command, args []string) error {
 		}
 		if _, err := c.Verify(opts); err != nil {
 			log.Printf("invalid certificate %s: %s", f, err)
+			continue
 		}
+		log.Printf("%s: OK", f)
 	}
 	return nil
+}
+
+func Pool(dir string, sys bool) (*x509.CertPool, error) {
+	is, err := ioutil.ReadDir(dir)
+	if err != nil && sys {
+		return x509.SystemCertPool()
+	}
+	pool := x509.NewCertPool()
+	for _, i := range is {
+		if i.IsDir() || filepath.Ext(i.Name()) == ".key" {
+			continue
+		}
+		bs, err := ioutil.ReadFile(filepath.Join(dir, i.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("can not read %s: %s", i.Name(), err)
+		}
+		if ok := pool.AppendCertsFromPEM(bs); !ok {
+			return nil, fmt.Errorf("can not read certificate from %s: %s", i.Name(), err)
+		}
+	}
+	return pool, nil
 }
