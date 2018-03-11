@@ -27,7 +27,7 @@ func runVerify(cmd *cli.Command, args []string) error {
 	opts := x509.VerifyOptions{
 		Roots:         base,
 		Intermediates: other,
-		Host:          *host,
+		DNSName:       *host,
 	}
 	for _, f := range cmd.Flag.Args() {
 		bs, err := ioutil.ReadFile(f)

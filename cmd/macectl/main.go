@@ -1,13 +1,66 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
+	"time"
 
 	"github.com/midbel/cli"
 )
+
+const (
+	DefaultRSAKeyLength = 2048
+	DefaultCertName     = "localhost"
+)
+
+const (
+	BlockTypeRSA   = "RSA PRIVATE KEY"
+	BlockTypeECDSA = "EC PRIVATE KEY"
+	BlockTypeCert  = "CERTIFICATE"
+	BlockTypeCSR   = "CERTIFICATE REQUEST"
+)
+
+type Time struct {
+	time.Time
+}
+
+func (t *Time) String() string {
+	return t.Time.String()
+}
+
+func (t *Time) Set(v string) error {
+	if v == "" {
+		t.Time = time.Now()
+		return nil
+	}
+	i, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return err
+	}
+	t.Time = i
+	return nil
+}
+
+type StringArray []string
+
+func (s *StringArray) String() string {
+	return fmt.Sprint(*s)
+}
+
+func (s *StringArray) Set(vs string) error {
+	for _, v := range strings.Split(vs, ",") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		*s = append(*s, v)
+	}
+	return nil
+}
 
 const helpText = `{{.Name}} contains various actions to monitor system activities.
 
@@ -51,6 +104,12 @@ options:
 	{
 		Usage: "sign",
 		Short: "sign a CSR from a ca certificate",
+		Run:   runSignCSR,
+	},
+	{
+		Usage: "emit [-e] [-c] [-n] [-x] <path>",
+		Short: "create a new certificate request",
+		Run:   runEmitCSR,
 	},
 	{
 		Usage: "revoke <cert>",

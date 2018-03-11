@@ -16,57 +16,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/midbel/cli"
 )
-
-const DefaultRSAKeyLength = 2048
-
-const (
-	BlockTypeRSA   = "RSA PRIVATE KEY"
-	BlockTypeECDSA = "EC PRIVATE KEY"
-	BlockTypeCert  = "CERTIFICATE"
-)
-
-type Time struct {
-	time.Time
-}
-
-func (t *Time) String() string {
-	return t.Time.String()
-}
-
-func (t *Time) Set(v string) error {
-	if v == "" {
-		t.Time = time.Now()
-		return nil
-	}
-	i, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		return err
-	}
-	t.Time = i
-	return nil
-}
-
-type StringArray []string
-
-func (s *StringArray) String() string {
-	return fmt.Sprint(*s)
-}
-
-func (s *StringArray) Set(vs string) error {
-	for _, v := range strings.Split(vs, ",") {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		*s = append(*s, v)
-	}
-	return nil
-}
 
 type Subject struct {
 	Country      string `toml:"country"`
@@ -265,7 +218,6 @@ func runGenerate(cmd *cli.Command, args []string) error {
 		return err
 	}
 	return writePrivateKey(filepath.Join(cmd.Flag.Arg(0), name+".key"), key)
-
 }
 
 func writePrivateKey(p string, s crypto.Signer) error {
