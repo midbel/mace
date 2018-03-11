@@ -194,13 +194,15 @@ func runConvertToCSR(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
-		return err
-	}
+
 	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
-	name := filepath.Base(cmd.Flag.Arg(0))
-	return ioutil.WriteFile(filepath.Join(*certdir, name+".csr"), buf.Bytes(), 0400)
+	n := filepath.Base(cmd.Flag.Arg(0))
+	w, err := os.OpenFile(filepath.Join(*certdir, n+".csr"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0400)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	return pem.Encode(w, &pem.Block{Type: BlockTypeCSR, Bytes: bs})
 }
