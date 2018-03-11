@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -141,4 +145,45 @@ func main() {
 	if err := cli.Run(commands, usage, nil); err != nil {
 		log.Fatalln(err)
 	}
+}
+
+func loadCA(cacert, cakey string) (*x509.Certificate, crypto.Signer, error) {
+	var (
+		b   *pem.Block
+		bs  []byte
+		err error
+	)
+	switch bs, err = ioutil.ReadFile(cacert); {
+	case err == nil:
+	case os.IsNotExist(err):
+		return nil, nil, nil
+	default:
+		return nil, nil, err
+	}
+	b, _ = pem.Decode(bs)
+	cert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cert.IsCA {
+		return nil, nil, fmt.Errorf("not a ca certificate")
+	}
+	if bs, err = ioutil.ReadFile(cakey); err != nil {
+		return nil, nil, err
+	}
+	b, _ = pem.Decode(bs)
+
+	var key crypto.Signer
+	switch b.Type {
+	case BlockTypeRSA:
+		key, err = x509.ParsePKCS1PrivateKey(b.Bytes)
+	case BlockTypeECDSA:
+		key, err = x509.ParseECPrivateKey(b.Bytes)
+	default:
+		return nil, nil, fmt.Errorf("unrecognized block type for CA key %s", b.Type)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return cert, key, nil
 }

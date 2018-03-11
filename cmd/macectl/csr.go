@@ -8,9 +8,12 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"log"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/midbel/cli"
 )
@@ -93,7 +96,66 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 }
 
 func runSignCSR(cmd *cli.Command, args []string) error {
-	return cmd.Flag.Parse(args)
+	certfile := cmd.Flag.String("p", "", "ca certificate")
+	keyfile := cmd.Flag.String("k", "", "ca private key")
+	certdir := cmd.Flag.String("d", "", "certificate directory")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
+		return err
+	}
+	cacert, cakey, err := loadCA(*certfile, *keyfile)
+	if err != nil {
+		return err
+	}
+	for _, a := range cmd.Flag.Args() {
+		bs, err := ioutil.ReadFile(a)
+		if err != nil {
+			log.Printf("fail to read %s: %s", a, err)
+			continue
+		}
+		b, _ := pem.Decode(bs)
+		csr, err := x509.ParseCertificateRequest(b.Bytes)
+		if err != nil {
+			log.Printf("fail to parse CSR from %s: %s", a, err)
+		}
+		if err := csr.CheckSignature(); err != nil {
+			log.Printf("fail to validate signature of %s: %s", a, err)
+		}
+		limit := new(big.Int).Lsh(big.NewInt(1), 128)
+		serial, err := rand.Int(rand.Reader, limit)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		cert := x509.Certificate{
+			Subject:               csr.Subject,
+			SerialNumber:          serial,
+			NotBefore:             now,
+			NotAfter:              now.Add(time.Hour * 24 * 365),
+			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+			BasicConstraintsValid: true,
+			IPAddresses:           csr.IPAddresses,
+			DNSNames:              csr.DNSNames,
+			EmailAddresses:        csr.EmailAddresses,
+		}
+		bs, err = x509.CreateCertificate(rand.Reader, &cert, cacert, csr.PublicKey, cakey)
+		if err != nil {
+			log.Printf("fail to create certificate from %s: %s", a, err)
+			continue
+		}
+		buf := new(bytes.Buffer)
+		if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCert, Bytes: bs}); err != nil {
+			log.Println("fail to encode certificate from %s: %s", a, err)
+			continue
+		}
+		name := filepath.Base(a) + ".crt"
+		if err := ioutil.WriteFile(filepath.Join(*certdir, name), buf.Bytes(), 0400); err != nil {
+			log.Println("fail to write certificate from %s: %s")
+		}
+	}
+	return nil
 }
 
 func runConvertToCSR(cmd *cli.Command, args []string) error {
