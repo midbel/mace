@@ -68,13 +68,13 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 	}
 
 	var s Subject
-	prompt("Country Name (2 letter code): ", &s.Country)
-	prompt("State Name (full name): ", &s.State)
-	prompt("Locality (eg, city): ", &s.Locality)
-	prompt("Organization (eg, company): ", &s.Organization)
-	prompt("Department (eg, IT): ", &s.Unit)
-	prompt("Name (eg, server FQDN): ", &s.Name)
-	prompt("Email (eg, no-reply@foobar.com): ", &s.Email)
+	s.Country = prompt("Country Name (2 letter code): ")
+	s.State = prompt("State Name (full name): ")
+	s.Locality = prompt("Locality (eg, city): ")
+	s.Organization = prompt("Organization (eg, company): ")
+	s.Unit = prompt("Department (eg, IT): ")
+	s.Name = prompt("Name (eg, server FQDN): ")
+	s.Email = prompt("Email (eg, no-reply@foobar.com): ")
 
 	csr, key, err := r.Create(s)
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto"
 	"crypto/ecdsa"
@@ -71,7 +72,7 @@ func (s *StringArray) Set(vs string) error {
 	return nil
 }
 
-const helpText = `{{.Name}} contains various actions to monitor system activities.
+const helpText = `{{.Name}} help you to manage easily your X509 certificates.
 
 Usage:
 
@@ -89,7 +90,7 @@ var commands = []*cli.Command{
 	{
 		Usage: "generate [-t] [-e] [-d] [-p] [-k] [-c] [-r] [-n] [-x] [-u] <path>",
 		Alias: []string{"gen"},
-		Short: "generate certificates",
+		Short: "generate certificate",
 		Run:   runGenerate,
 		Desc: `
 
@@ -112,17 +113,17 @@ options:
 	},
 	{
 		Usage: "sign [-d] [-p] [-k] <certificate,...>",
-		Short: "sign a CSR from a ca certificate",
+		Short: "sign a CSR from a CA certificate",
 		Run:   runSignCSR,
 	},
 	{
 		Usage: "emit [-e] [-c] [-n] [-x] <path>",
-		Short: "create a new certificate request",
+		Short: "create a new certificate signing request",
 		Run:   runEmitCSR,
 	},
 	{
 		Usage: "convert [-d] [-k] <certificate,...>",
-		Short: "transform a certificate to its corresponding csr",
+		Short: "emit a new certificate signing request from an existing certificate",
 		Run:   runConvertToCSR,
 	},
 	{
@@ -155,6 +156,13 @@ func main() {
 	if err := cli.Run(commands, usage, nil); err != nil {
 		log.Fatalln(err)
 	}
+}
+
+func prompt(s string) string {
+	fmt.Print(s)
+	r := bufio.NewReader(os.Stdin)
+	v, _ := r.ReadString('\n')
+	return strings.TrimSpace(v)
 }
 
 func loadCA(cacert, cakey string) (*x509.Certificate, crypto.Signer, error) {
