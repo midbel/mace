@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -197,7 +202,54 @@ func readPrivateKey(file string) (crypto.Signer, error) {
 	case BlockTypeECDSA:
 		key, err = x509.ParseECPrivateKey(b.Bytes)
 	default:
-		return nil, fmt.Errorf("unexpected key type %s", b.Type)
+		return nil, fmt.Errorf("unsupported key type %s", b.Type)
+	}
+	return key, err
+}
+
+func writePrivateKey(p string, s crypto.Signer) error {
+	var (
+		bs []byte
+		t  string
+	)
+	switch k := s.(type) {
+	case *rsa.PrivateKey:
+		bs = x509.MarshalPKCS1PrivateKey(k)
+		t = BlockTypeRSA
+	case *ecdsa.PrivateKey:
+		vs, err := x509.MarshalECPrivateKey(k)
+		if err != nil {
+			return err
+		}
+		bs, t = vs, BlockTypeECDSA
+	default:
+		return fmt.Errorf("unrecognized private key type  (%T)", s)
+	}
+	buf := new(bytes.Buffer)
+	if err := pem.Encode(buf, &pem.Block{Type: t, Bytes: bs}); err != nil {
+		return fmt.Errorf("encode key: %s", err)
+	}
+	return ioutil.WriteFile(p, buf.Bytes(), 0400)
+}
+
+func createPrivateKey(c string, n int) (crypto.Signer, error) {
+	var (
+		key crypto.Signer
+		err error
+	)
+	switch c {
+	case "":
+		key, err = rsa.GenerateKey(rand.Reader, n)
+	case "P224":
+		key, err = ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	case "P256":
+		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	case "P384":
+		key, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	case "P521":
+		key, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	default:
+		err = fmt.Errorf("unrecognized curve %s", c)
 	}
 	return key, err
 }

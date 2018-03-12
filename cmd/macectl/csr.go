@@ -51,7 +51,7 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 
 	name, err := os.Hostname()
 	if err == nil {
-		name = "localhost"
+		name = DefaultCertName
 	}
 
 	cmd.Flag.Var(&r.Hosts, "x", "")
@@ -182,12 +182,12 @@ func runConvertToCSR(cmd *cli.Command, args []string) error {
 	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
-  for _, a := range cmd.Flag.Args() {
-    if err := convertCertToCSR(a, *certdir, certkey); err != nil {
-      log.Printf("fail to create CSR from %s: %s", a, err)
-    }
-  }
-  return nil
+	for _, a := range cmd.Flag.Args() {
+		if err := convertCertToCSR(a, *certdir, certkey); err != nil {
+			log.Printf("fail to create CSR from %s: %s", a, err)
+		}
+	}
+	return nil
 }
 
 func convertCertToCSR(file, dir string, key crypto.Signer) error {
