@@ -32,6 +32,7 @@ const (
 	BlockTypeECDSA = "EC PRIVATE KEY"
 	BlockTypeCert  = "CERTIFICATE"
 	BlockTypeCSR   = "CERTIFICATE REQUEST"
+	BlockTypeCRL   = "X509 CRL"
 )
 
 type Time struct {
@@ -127,7 +128,7 @@ options:
 		Run:   runConvertToCSR,
 	},
 	{
-		Usage: "revoke <cert>",
+		Usage: "revoke [-c] [-k] [-e] [-f] <certificate,...>",
 		Short: "revoke a certificate",
 		Run:   runRevoke,
 	},
