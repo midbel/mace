@@ -62,11 +62,6 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 		return err
 	}
 
-	prompt := func(label string, v interface{}) {
-		fmt.Print(label)
-		fmt.Scanln(v)
-	}
-
 	var s Subject
 	s.Country = prompt("Country Name (2 letter code): ")
 	s.State = prompt("State Name (full name): ")

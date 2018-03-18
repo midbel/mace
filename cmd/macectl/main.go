@@ -129,6 +129,7 @@ options:
 	{
 		Usage: "revoke <cert>",
 		Short: "revoke a certificate",
+		Run:   runRevoke,
 	},
 	{
 		Usage: "verify [-r] [-i] <certificate,...>",
