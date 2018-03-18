@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,7 +30,11 @@ func runRevoke(cmd *cli.Command, args []string) error {
 		expired.Time = n
 	}
 	if k := cert.Cert.KeyUsage & x509.KeyUsageCRLSign; k != x509.KeyUsageCRLSign {
-		return fmt.Errorf("given certificate is not authorized to sign CRL")
+		return x509.CertificateInvalidError{
+			Cert:   cert.Cert,
+			Reason: x509.IncompatibleUsage,
+			Detail: "can not sign CRL",
+		}
 	}
 
 	var rs []pkix.RevokedCertificate

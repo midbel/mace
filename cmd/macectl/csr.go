@@ -91,19 +91,28 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 }
 
 func runSignCSR(cmd *cli.Command, args []string) error {
-	certfile := cmd.Flag.String("p", "", "ca certificate")
-	keyfile := cmd.Flag.String("k", "", "ca private key")
+	var (
+		cacert cli.Certificate
+		cakey  cli.PrivateKey
+	)
+	cmd.Flag.Var(&cacert, "c", "ca certificate")
+	cmd.Flag.Var(&cakey, "k", "ca private key")
 	certdir := cmd.Flag.String("d", "", "certificate directory")
+	period := cmd.Flag.Duration("e", time.Hour*24*365, "period")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
+	}
+	if k := cacert.Cert.KeyUsage & x509.KeyUsageCertSign; !cacert.Cert.IsCA || k != x509.KeyUsageCertSign {
+		return x509.CertificateInvalidError{
+			Cert:   cacert.Cert,
+			Reason: x509.NotAuthorizedToSign,
+			Detail: "can not sign certificate",
+		}
 	}
 	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
-	cacert, cakey, err := loadCA(*certfile, *keyfile)
-	if err != nil {
-		return err
-	}
+
 	for _, a := range cmd.Flag.Args() {
 		bs, err := ioutil.ReadFile(a)
 		if err != nil {
@@ -128,14 +137,14 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 			Subject:               csr.Subject,
 			SerialNumber:          serial,
 			NotBefore:             now,
-			NotAfter:              now.Add(time.Hour * 24 * 365),
+			NotAfter:              now.Add(*period),
 			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 			BasicConstraintsValid: true,
 			IPAddresses:           csr.IPAddresses,
 			DNSNames:              csr.DNSNames,
 			EmailAddresses:        csr.EmailAddresses,
 		}
-		bs, err = x509.CreateCertificate(rand.Reader, &cert, cacert, csr.PublicKey, cakey)
+		bs, err = x509.CreateCertificate(rand.Reader, &cert, cacert.Cert, csr.PublicKey, cakey.Key)
 		if err != nil {
 			log.Printf("fail to create certificate from %s: %s", a, err)
 			continue
