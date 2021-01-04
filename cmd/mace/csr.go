@@ -92,8 +92,8 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 
 func runSignCSR(cmd *cli.Command, args []string) error {
 	var (
-		cacert cli.Certificate
-		cakey  cli.PrivateKey
+		cacert Certificate
+		cakey  PrivateKey
 	)
 	cmd.Flag.Var(&cacert, "c", "ca certificate")
 	cmd.Flag.Var(&cakey, "k", "ca private key")

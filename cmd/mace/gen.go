@@ -46,7 +46,7 @@ func (s Subject) ToName() pkix.Name {
 	}
 }
 
-type Certificate struct {
+type CertificateTemplate struct {
 	Root   bool
 	CACert string
 	CAKey  string
@@ -60,11 +60,11 @@ type Certificate struct {
 	Bits  int
 }
 
-func (c Certificate) LoadCA() (*x509.Certificate, crypto.Signer, error) {
+func (c CertificateTemplate) LoadCA() (*x509.Certificate, crypto.Signer, error) {
 	return loadCA(c.CACert, c.CAKey)
 }
 
-func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error) {
+func (c CertificateTemplate) Create(s Subject) (*x509.Certificate, crypto.Signer, error) {
 	key, err := createPrivateKey(c.Curve, c.Bits)
 	if err != nil {
 		return nil, nil, err
@@ -118,7 +118,7 @@ func (c Certificate) Create(s Subject) (*x509.Certificate, crypto.Signer, error)
 }
 
 func runGenerate(cmd *cli.Command, args []string) error {
-	var c Certificate
+	var c CertificateTemplate
 
 	name, err := os.Hostname()
 	if err == nil {

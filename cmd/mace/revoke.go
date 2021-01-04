@@ -14,14 +14,15 @@ import (
 
 func runRevoke(cmd *cli.Command, args []string) error {
 	var (
-		cert    cli.Certificate
-		key     cli.PrivateKey
-		expired cli.Time
+		cert    Certificate
+		key     PrivateKey
+		expired Time
+		datadir string
 	)
 	cmd.Flag.Var(&cert, "c", "certificate")
 	cmd.Flag.Var(&key, "k", "private key")
 	cmd.Flag.Var(&expired, "e", "expired")
-	datadir := cmd.Flag.String("d", "", "datadir")
+	cmd.Flag.StringVar(&datadir, "d", "", "datadir")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}

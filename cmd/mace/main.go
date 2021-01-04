@@ -35,6 +35,56 @@ const (
 	BlockTypeCRL   = "X509 CRL"
 )
 
+type Certificate struct {
+	Cert *x509.Certificate
+}
+
+func (c *Certificate) String() string {
+	return "CERTIFICATE"
+}
+
+func (c *Certificate) Set(v string) error {
+	bs, err := ioutil.ReadFile(v)
+	if err != nil {
+		return err
+	}
+	b, _ := pem.Decode(bs)
+	cert, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return err
+	}
+	c.Cert = cert
+	return nil
+}
+
+type PrivateKey struct {
+	Key crypto.PrivateKey
+}
+
+func (p *PrivateKey) String() string {
+	return "PRIVATE KEY"
+}
+
+func (p *PrivateKey) Set(v string) error {
+	bs, err := ioutil.ReadFile(v)
+	if err != nil {
+		return err
+	}
+	b, _ := pem.Decode(bs)
+
+	var key crypto.Signer
+	switch b.Type {
+	case BlockTypeRSA:
+		key, err = x509.ParsePKCS1PrivateKey(b.Bytes)
+	case BlockTypeECDSA:
+		key, err = x509.ParseECPrivateKey(b.Bytes)
+	default:
+		return fmt.Errorf("unsupported key type %s", b.Type)
+	}
+	p.Key = key
+	return err
+}
+
 type Time struct {
 	time.Time
 }
@@ -93,19 +143,6 @@ var commands = []*cli.Command{
 		Alias: []string{"gen"},
 		Short: "generate certificate",
 		Run:   runGenerate,
-		Desc: `
-
-options:
-  -t date
-  -d period
-  -p parent
-  -c bits
-  -r root
-  -n name
-  -x host
-  -e curve
-	-u usage
-`,
 	},
 	{
 		Usage: "genrsa [-n] <file>",
@@ -155,9 +192,7 @@ func main() {
 
 		os.Exit(2)
 	}
-	if err := cli.Run(commands, usage, nil); err != nil {
-		log.Fatalln(err)
-	}
+	cli.RunAndExit(commands, usage)
 }
 
 func prompt(s string) string {
