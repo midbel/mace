@@ -47,12 +47,11 @@ func (r Request) Create(s Subject) (*x509.CertificateRequest, crypto.Signer, err
 }
 
 func runEmitCSR(cmd *cli.Command, args []string) error {
-	var r Request
-
 	name, err := os.Hostname()
 	if err == nil {
 		name = DefaultCertName
 	}
+	var r Request
 
 	cmd.Flag.Var(&r.Hosts, "x", "")
 	cmd.Flag.IntVar(&r.Bits, "c", DefaultRSAKeyLength, "")
@@ -80,8 +79,8 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create csr: %s", err)
 	}
-	buf := new(bytes.Buffer)
-	if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
+	var buf bytes.Buffer
+	if err := pem.Encode(&buf, &pem.Block{Type: BlockTypeCSR, Bytes: bs}); err != nil {
 		return fmt.Errorf("encode csr: %s", err)
 	}
 	if err := ioutil.WriteFile(filepath.Join(cmd.Flag.Arg(0), name+".pem"), buf.Bytes(), 0400); err != nil {
@@ -92,13 +91,15 @@ func runEmitCSR(cmd *cli.Command, args []string) error {
 
 func runSignCSR(cmd *cli.Command, args []string) error {
 	var (
-		cacert Certificate
-		cakey  PrivateKey
+		cacert  Certificate
+		cakey   PrivateKey
+		certdir string
+		period  time.Duration
 	)
 	cmd.Flag.Var(&cacert, "c", "ca certificate")
 	cmd.Flag.Var(&cakey, "k", "ca private key")
-	certdir := cmd.Flag.String("d", "", "certificate directory")
-	period := cmd.Flag.Duration("e", time.Hour*24*365, "period")
+	cmd.Flag.StringVar(&certdir, "d", "", "certificate directory")
+	cmd.Flag.DurationVar(&period, "e", time.Hour*24*365, "period")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -109,7 +110,7 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 			Detail: "can not sign certificate",
 		}
 	}
-	if err := os.MkdirAll(*certdir, 0755); err != nil && !os.IsExist(err) {
+	if err := os.MkdirAll(certdir, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
 
@@ -137,7 +138,7 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 			Subject:               csr.Subject,
 			SerialNumber:          serial,
 			NotBefore:             now,
-			NotAfter:              now.Add(*period),
+			NotAfter:              now.Add(period),
 			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 			BasicConstraintsValid: true,
 			IPAddresses:           csr.IPAddresses,
@@ -149,13 +150,13 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 			log.Printf("fail to create certificate from %s: %s", a, err)
 			continue
 		}
-		buf := new(bytes.Buffer)
-		if err := pem.Encode(buf, &pem.Block{Type: BlockTypeCert, Bytes: bs}); err != nil {
+		var buf bytes.Buffer
+		if err := pem.Encode(&buf, &pem.Block{Type: BlockTypeCert, Bytes: bs}); err != nil {
 			log.Println("fail to encode certificate from %s: %s", a, err)
 			continue
 		}
 		name := filepath.Base(a) + ".crt"
-		if err := ioutil.WriteFile(filepath.Join(*certdir, name), buf.Bytes(), 0400); err != nil {
+		if err := ioutil.WriteFile(filepath.Join(certdir, name), buf.Bytes(), 0400); err != nil {
 			log.Println("fail to write certificate from %s: %s")
 		}
 	}
@@ -163,8 +164,10 @@ func runSignCSR(cmd *cli.Command, args []string) error {
 }
 
 func runConvertToCSR(cmd *cli.Command, args []string) error {
-	key := cmd.Flag.String("k", "", "key file")
-	certdir := cmd.Flag.String("d", "", "certificates directory")
+	var (
+		key     = cmd.Flag.String("k", "", "key file")
+		certdir = cmd.Flag.String("d", "", "certificates directory")
+	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}

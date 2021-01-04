@@ -54,7 +54,7 @@ func runRevoke(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	file := filepath.Join(*datadir, "crl.pem")
+	file := filepath.Join(datadir, "crl.pem")
 	f, err := os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0400)
 	if err != nil {
 		return err

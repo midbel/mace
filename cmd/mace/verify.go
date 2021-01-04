@@ -12,17 +12,20 @@ import (
 )
 
 func runVerify(cmd *cli.Command, args []string) error {
-	rootdir := cmd.Flag.String("r", "", "root ca certificates")
-	intdir := cmd.Flag.String("i", "", "intermediate ca certificates")
-	host := cmd.Flag.String("x", "", "host")
+	var (
+		rootdir = cmd.Flag.String("r", "", "root ca certificates")
+		intdir  = cmd.Flag.String("i", "", "intermediate ca certificates")
+		host    = cmd.Flag.String("x", "", "host")
+		system  = cmd.Flag.Bool("s", false, "use system root pool")
+	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	base, err := Pool(*rootdir, true)
+	base, err := Pool(*rootdir, *system)
 	if err != nil {
 		return err
 	}
-	other, _ := Pool(*intdir, false)
+	other, _ := Pool(*intdir, *system)
 
 	opts := x509.VerifyOptions{
 		Roots:         base,
@@ -30,9 +33,13 @@ func runVerify(cmd *cli.Command, args []string) error {
 		DNSName:       *host,
 	}
 	for _, f := range cmd.Flag.Args() {
+		if i, err := os.Stat(f); err == nil && i.IsDir() {
+			log.Printf("skip %s", f)
+			continue
+		}
 		bs, err := ioutil.ReadFile(f)
 		if err != nil {
-			return fmt.Errorf("can not read certificate %s: %s", f, err)
+			return fmt.Errorf("can not read certificate %s: %v", f, err)
 		}
 		b, _ := pem.Decode(bs)
 		c, err := x509.ParseCertificate(b.Bytes)
@@ -60,10 +67,10 @@ func Pool(dir string, sys bool) (*x509.CertPool, error) {
 		}
 		bs, err := ioutil.ReadFile(filepath.Join(dir, i.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("can not read %s: %s", i.Name(), err)
+			return nil, fmt.Errorf("can not read %s: %v", i.Name(), err)
 		}
 		if ok := pool.AppendCertsFromPEM(bs); !ok {
-			return nil, fmt.Errorf("can not read certificate from %s: %s", i.Name(), err)
+			return nil, fmt.Errorf("can not read certificate from %s: %v", i.Name(), err)
 		}
 	}
 	return pool, nil
